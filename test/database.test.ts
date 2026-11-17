@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { deleteStory, initialize, loadAppSettings, loadLibrary, loadSettings, loadStory, saveAppSettings, saveProgress, saveSettings, saveStory, setFavorite } from '../src/database.ts';
+import { getStoryTranslation } from '../src/story-translations.ts';
+import { stories } from '../src/stories.ts';
 
 function connect(path: string) {
   const sqlite = new DatabaseSync(path);
@@ -215,4 +217,22 @@ test('adiciona idioma e tema a um banco anterior e preserva as escolhas', async 
   } finally {
     close();
   }
+});
+
+test('cada idioma contém o título e as 35 cenas do catálogo na ordem da versão original', () => {
+  assert.equal(stories.length, 9);
+  for (const language of ['en', 'es', 'fr'] as const) {
+    for (const story of stories) {
+      const translation = getStoryTranslation(language, story.id);
+      assert.ok(translation?.title.trim(), `Título ausente: ${language}/${story.id}`);
+      assert.equal(translation.scenes.length, story.scenes.length);
+      for (const [position, [title, text]] of translation.scenes.entries()) {
+        assert.ok(title.trim() && text.trim(), `Cena incompleta: ${language}/${story.id}/${position}`);
+        assert.notEqual(text, story.scenes[position].text);
+      }
+    }
+    assert.equal(getStoryTranslation(language, 'historia-propria'), undefined);
+  }
+  assert.equal(stories.reduce((count, story) => count + story.scenes.length, 0), 35);
+  assert.equal(getStoryTranslation('pt', 'dentista'), undefined);
 });

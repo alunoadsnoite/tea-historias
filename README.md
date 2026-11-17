@@ -8,9 +8,9 @@ Use **Favoritar** em um cartão e **Favoritos** para filtrar a biblioteca. Em **
 
 A busca da biblioteca encontra títulos e categorias mesmo sem acentos. Ela funciona em conjunto com os filtros. No editor, **Subir cena** e **Descer cena** mudam a ordem após salvar. Use **Excluir história** no cartão de uma história própria e confirme a exclusão.
 
-Em **Configurações**, escolha o idioma da interface e o tema. O modo **Automático** acompanha o tema do Android. Os textos das histórias são exibidos em seu idioma original. Toque no endereço de contato para abrir o aplicativo de e-mail.
+Em **Configurações**, escolha o idioma da interface e o tema. O modo **Automático** acompanha o tema do Android. As nove histórias da biblioteca acompanham o idioma escolhido. Histórias criadas no editor usam o texto que você escreveu. Toque no endereço de contato para abrir o aplicativo de e-mail.
 
-Instale o APK 1.3.0 sobre a versão instalada para manter o progresso, as histórias próprias, os favoritos e os ajustes.
+Instale o APK 1.3.1 sobre a versão instalada para manter o progresso, as histórias próprias, os favoritos e os ajustes.
 
 ## Desenvolver no Fedora
 

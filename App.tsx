@@ -13,6 +13,7 @@ import {
 import type { AppSettings, Draft, Listing, ReadingSettings, Scene } from './src/database';
 import { languages, translate } from './src/i18n';
 import type { Language, Message } from './src/i18n';
+import { getStoryTranslation } from './src/story-translations';
 
 const developerEmail = 'valdenor.sa@proton.me';
 const catalogCategories = new Map<string, Message>([
@@ -312,7 +313,18 @@ function AppContent() {
     }, 'progressError');
   }
 
+  function storyTranslation(story: Listing) {
+    return story.custom ? undefined : getStoryTranslation(appSettings.language, story.id);
+  }
+
+  function storyTitle(story: Listing) {
+    return storyTranslation(story)?.title ?? story.title;
+  }
+
   const scene = reader?.scenes[reader.position];
+  const sceneTranslation = reader && storyTranslation(reader.story)?.scenes[reader.position];
+  const sceneTitle = sceneTranslation?.[0] ?? scene?.title;
+  const sceneText = sceneTranslation?.[1] ?? scene?.text;
   const categories = [...new Set(library?.map((story) => story.category))];
   const search = searchable(query);
   function categoryLabel(name: string) {
@@ -322,7 +334,7 @@ function AppContent() {
   const visible = library?.filter((story) =>
     (category === null || story.category === category) &&
     (!favoriteOnly || !!story.favorite) &&
-    searchable(`${story.title} ${story.category} ${categoryLabel(story.category)}`).includes(search));
+    searchable(`${storyTitle(story)} ${story.category} ${categoryLabel(story.category)}`).includes(search));
 
   return (
     <StylesContext.Provider value={styles}>
@@ -408,15 +420,15 @@ function AppContent() {
           ) : reader && scene ? (
             <>
               <Button label={t('back')} action={leave} secondary disabled={busy} />
-              <Text style={styles.storyTitle}>{reader.story.title}</Text>
+              <Text style={styles.storyTitle}>{storyTitle(reader.story)}</Text>
               <Text importantForAccessibility="no" style={styles.caption}>{t('scenePosition', { n: reader.position + 1, total: reader.scenes.length })}</Text>
               <Text accessible ref={heading} accessibilityRole="header"
-                accessibilityLabel={`${t('scenePosition', { n: reader.position + 1, total: reader.scenes.length })}. ${scene.title}`}
-                style={[styles.heading, settings.large_text ? styles.largeHeading : null]}>{scene.title}</Text>
+                accessibilityLabel={`${t('scenePosition', { n: reader.position + 1, total: reader.scenes.length })}. ${sceneTitle}`}
+                style={[styles.heading, settings.large_text ? styles.largeHeading : null]}>{sceneTitle}</Text>
               {!settings.hide_images && illustrations[scene.illustration] && (
                 <Image accessible={false} source={illustrations[scene.illustration]} style={styles.illustration} />
               )}
-              <Text style={[styles.body, settings.large_text ? styles.largeBody : null]}>{scene.text}</Text>
+              <Text style={[styles.body, settings.large_text ? styles.largeBody : null]}>{sceneText}</Text>
               <View style={styles.controls}>
                 {reader.position > 0 && (
                   <Button label={t('previous')} action={() => goTo(reader.position - 1)} secondary disabled={busy} />
@@ -460,17 +472,17 @@ function AppContent() {
                         style={({ pressed }) => [styles.storyLink, pressed && styles.pressed]}
                         onPress={() => open(story)}>
                         <Text style={styles.caption}>{categoryLabel(story.category)} · {t(story.count === 1 ? 'sceneCount' : 'scenesCount', { n: story.count })}</Text>
-                        <Text style={styles.cardTitle}>{story.title}</Text>
+                        <Text style={styles.cardTitle}>{storyTitle(story)}</Text>
                       </Pressable>
                       <View style={styles.categories}>
                         <Choice label={story.favorite ? t('unfavorite') : t('favorite')}
-                          accessibilityLabel={`${story.favorite ? t('unfavorite') : t('favorite')}: ${story.title}`}
+                          accessibilityLabel={`${story.favorite ? t('unfavorite') : t('favorite')}: ${storyTitle(story)}`}
                           selected={!!story.favorite} disabled={busy} action={() => toggleFavorite(story)} />
                         {!!story.custom && (
                           <>
-                            <Button label={t('editStory')} accessibilityLabel={`${t('editStory')}: ${story.title}`}
+                            <Button label={t('editStory')} accessibilityLabel={`${t('editStory')}: ${storyTitle(story)}`}
                               action={() => edit(story)} secondary disabled={busy} />
-                            <Button label={t('deleteStory')} accessibilityLabel={`${t('deleteStory')}: ${story.title}`}
+                            <Button label={t('deleteStory')} accessibilityLabel={`${t('deleteStory')}: ${storyTitle(story)}`}
                               action={() => confirmDelete(story)} secondary disabled={busy} />
                           </>
                         )}
