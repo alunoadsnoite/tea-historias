@@ -1,4 +1,5 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
+import type { Language } from './i18n.ts';
 import { stories } from './stories.ts';
 
 export type Listing = { id: string; title: string; category: string; count: number; custom: number; favorite: number };
@@ -10,8 +11,8 @@ export async function initialize(db: SQLiteDatabase) {
   await db.execAsync('PRAGMA foreign_keys = ON;');
   await db.withExclusiveTransactionAsync(async (tx) => {
     const version = await tx.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
-    if (version?.user_version === 2) return;
-    if (version?.user_version !== 0 && version?.user_version !== 1) {
+    if (version?.user_version === 4) return;
+    if (!version || version.user_version < 0 || version.user_version > 3) {
       throw new Error('Versão do banco incompatível');
     }
     if (version.user_version === 0) {
@@ -27,24 +28,42 @@ export async function initialize(db: SQLiteDatabase) {
           position INTEGER NOT NULL, completed INTEGER NOT NULL DEFAULT 0
         );
       `);
+    }
+    if (version.user_version < 2) {
+      await tx.execAsync(`
+        ALTER TABLE stories ADD COLUMN custom INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE stories ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
+        CREATE TABLE reading_settings (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          large_text INTEGER NOT NULL DEFAULT 0,
+          hide_images INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO reading_settings (id) VALUES (1);
+      `);
+    }
+    if (version.user_version < 3) {
       for (const [ordinal, story] of stories.entries()) {
-        await tx.runAsync('INSERT INTO stories VALUES (?, ?, ?, ?)', story.id, story.title, story.category, ordinal);
+        await tx.runAsync(`
+          INSERT INTO stories (id, title, category, ordinal) VALUES (?, ?, ?, ?)
+          ON CONFLICT(id) DO NOTHING
+        `, story.id, story.title, story.category, ordinal);
         for (const [position, scene] of story.scenes.entries()) {
-          await tx.runAsync('INSERT INTO scenes VALUES (?, ?, ?, ?, ?)',
-            story.id, position, scene.illustration, scene.title, scene.text);
+          await tx.runAsync(`
+            INSERT INTO scenes (story_id, position, illustration, title, text) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(story_id, position) DO NOTHING
+          `, story.id, position, scene.illustration, scene.title, scene.text);
         }
       }
     }
     await tx.execAsync(`
-      ALTER TABLE stories ADD COLUMN custom INTEGER NOT NULL DEFAULT 0;
-      ALTER TABLE stories ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
-      CREATE TABLE reading_settings (
+      CREATE TABLE IF NOT EXISTS app_settings (
         id INTEGER PRIMARY KEY CHECK (id = 1),
-        large_text INTEGER NOT NULL DEFAULT 0,
-        hide_images INTEGER NOT NULL DEFAULT 0
+        language TEXT NOT NULL CHECK (language IN ('pt', 'en', 'es', 'fr')),
+        theme TEXT NOT NULL CHECK (theme IN ('light', 'dark', 'system'))
       );
-      INSERT INTO reading_settings (id) VALUES (1);
-      PRAGMA user_version = 2;
+      INSERT INTO app_settings (id, language, theme) VALUES (1, 'pt', 'light')
+        ON CONFLICT(id) DO NOTHING;
+      PRAGMA user_version = 4;
     `);
   });
 }
@@ -53,7 +72,7 @@ export async function loadLibrary(db: Database) {
   return db.getAllAsync<Listing>(`
     SELECT stories.id, stories.title, stories.category, COUNT(scenes.position) AS count, stories.custom, stories.favorite
     FROM stories JOIN scenes ON scenes.story_id = stories.id
-    GROUP BY stories.id ORDER BY stories.ordinal
+    GROUP BY stories.id ORDER BY stories.custom, stories.ordinal, stories.id
   `);
 }
 
@@ -133,4 +152,18 @@ export async function deleteStory(db: SQLiteDatabase, id: string) {
     await tx.runAsync('DELETE FROM scenes WHERE story_id = ?', id);
     await tx.runAsync('DELETE FROM stories WHERE id = ?', id);
   });
+}
+
+export const themeOptions = ['light', 'dark', 'system'] as const;
+export type AppSettings = { language: Language; theme: typeof themeOptions[number] };
+
+export async function loadAppSettings(db: Database) {
+  const settings = await db.getFirstAsync<AppSettings>('SELECT language, theme FROM app_settings WHERE id = 1');
+  if (!settings) throw new Error('Preferências do aplicativo indisponíveis');
+  return settings;
+}
+
+export async function saveAppSettings(db: Database, settings: AppSettings) {
+  await db.runAsync('UPDATE app_settings SET language = ?, theme = ? WHERE id = 1',
+    settings.language, settings.theme);
 }

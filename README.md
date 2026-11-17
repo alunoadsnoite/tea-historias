@@ -1,14 +1,16 @@
 # TEA Histórias — Sprint 3
 
-Aplicativo Android de histórias sociais em português do Brasil. A biblioteca inclui 14 cenas ilustradas em três histórias. As histórias e a posição de leitura ficam no SQLite do dispositivo. Ao concluir uma história, ela volta à primeira cena na próxima abertura.
+Aplicativo Android de histórias sociais em português do Brasil. A biblioteca inclui 35 cenas ilustradas em nove histórias. As histórias e a posição de leitura ficam no SQLite do dispositivo. Ao concluir uma história, ela volta à primeira cena na próxima abertura.
 
 Na biblioteca, **Nova história** abre o editor. Dê um título e uma categoria, escreva cada cena e escolha uma ilustração do acervo, se quiser. Use **Editar história** no cartão de uma história própria. Ao salvar uma edição, a leitura daquela história recomeça na primeira cena.
 
-Use **Favoritar** em um cartão e **Favoritos** para filtrar a biblioteca. Em **Ajustes de leitura**, é possível aumentar o texto ou ocultar ilustrações. O app salva essas escolhas no dispositivo.
+Use **Favoritar** em um cartão e **Favoritos** para filtrar a biblioteca. Em **Configurações**, é possível aumentar o texto ou ocultar ilustrações. O app salva essas escolhas no dispositivo.
 
 A busca da biblioteca encontra títulos e categorias mesmo sem acentos. Ela funciona em conjunto com os filtros. No editor, **Subir cena** e **Descer cena** mudam a ordem após salvar. Use **Excluir história** no cartão de uma história própria e confirme a exclusão.
 
-Instale o APK da Sprint 3 sobre o da Sprint 2 para manter o progresso, as histórias próprias, os favoritos e os ajustes.
+Em **Configurações**, escolha o idioma da interface e o tema. O modo **Automático** acompanha o tema do Android. Os textos das histórias são exibidos em seu idioma original. Toque no endereço de contato para abrir o aplicativo de e-mail.
+
+Instale o APK 1.3.0 sobre a versão instalada para manter o progresso, as histórias próprias, os favoritos e os ajustes.
 
 ## Desenvolver no Fedora
 
@@ -34,7 +36,7 @@ O APK incorpora o código e as imagens. Ele abre diretamente no Android. O proje
 
 ## Roteiro de teste no Android
 
-1. Desative Wi-Fi e dados móveis antes da primeira abertura. Confira os três títulos e os filtros da biblioteca.
+1. Desative Wi-Fi e dados móveis antes da primeira abertura. Confira os nove títulos e os filtros da biblioteca.
 2. Abra cada história e avance pelas cenas. Use o botão de voltar do Android e o botão Voltar à biblioteca.
 3. Em uma cena intermediária, encerre o app e abra a história novamente. Confira a retomada. Conclua a história e confirme que a próxima abertura começa na primeira cena.
 4. Crie uma história com duas cenas, favorite-a e edite-a. Reinicie o app e confira a história, o favorito e os ajustes de leitura.

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { deleteStory, initialize, loadLibrary, loadSettings, loadStory, saveProgress, saveSettings, saveStory, setFavorite } from '../src/database.ts';
+import { deleteStory, initialize, loadAppSettings, loadLibrary, loadSettings, loadStory, saveAppSettings, saveProgress, saveSettings, saveStory, setFavorite } from '../src/database.ts';
 
 function connect(path: string) {
   const sqlite = new DatabaseSync(path);
@@ -33,7 +33,7 @@ test('inicializa a biblioteca uma vez e preserva a ordem das cenas', async () =>
     await initialize(db);
     await initialize(db);
     const library = await loadLibrary(db);
-    assert.deepEqual(library.map(({ title, count }) => [title, count]), [
+    assert.deepEqual(library.slice(0, 3).map(({ title, count }) => [title, count]), [
       ['Vou ao dentista', 5],
       ['Posso pedir uma pausa', 4],
       ['Vou a uma entrevista de emprego', 5],
@@ -95,7 +95,7 @@ test('atualiza um banco da Sprint 1 preservando histórias e progresso', async (
     `);
     await initialize(db);
     await initialize(db);
-    assert.deepEqual((await loadLibrary(db)).map((story) => ({ ...story })), [
+    assert.deepEqual((await loadLibrary(db)).filter((story) => story.id === "original").map((story) => ({ ...story })), [
       { id: 'original', title: 'História original', category: 'Saúde', count: 2, custom: 0, favorite: 0 },
     ]);
     assert.equal((await loadStory(db, 'original')).position, 1);
@@ -161,8 +161,57 @@ test('salva a nova ordem e exclui somente histórias próprias com seus dados', 
     assert.equal(await db.getFirstAsync('SELECT 1 FROM progress WHERE story_id = ?', created.id), null);
     await assert.rejects(loadStory(db, created.id), /indisponível/);
     const library = await loadLibrary(db);
-    assert.equal(library.length, 3);
+    assert.equal(library.length, 9);
     assert.ok(library.some((story) => story.id === 'dentista'));
+  } finally {
+    close();
+  }
+});
+
+test('acrescenta as seis histórias a uma instalação existente sem perder dados', async () => {
+  const { db, close } = connect(':memory:');
+  try {
+    await initialize(db);
+    await db.execAsync(`
+      DELETE FROM scenes WHERE story_id IN ('onibus', 'mercado', 'mudanca', 'trabalho-ajuda', 'barulho', 'festa');
+      DELETE FROM stories WHERE id IN ('onibus', 'mercado', 'mudanca', 'trabalho-ajuda', 'barulho', 'festa');
+      PRAGMA user_version = 2;
+    `);
+    await setFavorite(db, 'dentista', true);
+    await saveProgress(db, 'dentista', 1);
+    await saveSettings(db, { large_text: 1, hide_images: 1 });
+    await saveStory(db, {
+      title: 'Minha história', category: 'Casa',
+      scenes: [{ title: 'Início', text: 'Começo', illustration: '' }],
+    });
+    await initialize(db);
+    await initialize(db);
+    const library = await loadLibrary(db);
+    assert.equal(library.length, 10);
+    assert.equal(library.find((story) => story.id === 'dentista')?.favorite, 1);
+    assert.equal((await loadStory(db, 'dentista')).position, 1);
+    assert.equal((await loadStory(db, 'onibus')).scenes.length, 4);
+    assert.equal(library.at(-1)?.title, 'Minha história');
+    assert.deepEqual({ ...await loadSettings(db) }, { large_text: 1, hide_images: 1 });
+  } finally {
+    close();
+  }
+});
+
+test('adiciona idioma e tema a um banco anterior e preserva as escolhas', async () => {
+  const { db, close } = connect(':memory:');
+  try {
+    await initialize(db);
+    await db.execAsync('DROP TABLE app_settings; PRAGMA user_version = 3;');
+    await saveSettings(db, { large_text: 1, hide_images: 1 });
+    await saveProgress(db, 'dentista', 2);
+    await initialize(db);
+    assert.deepEqual({ ...await loadAppSettings(db) }, { language: 'pt', theme: 'light' });
+    await saveAppSettings(db, { language: 'fr', theme: 'system' });
+    await initialize(db);
+    assert.deepEqual({ ...await loadAppSettings(db) }, { language: 'fr', theme: 'system' });
+    assert.deepEqual({ ...await loadSettings(db) }, { large_text: 1, hide_images: 1 });
+    assert.equal((await loadStory(db, 'dentista')).position, 2);
   } finally {
     close();
   }

@@ -1,16 +1,24 @@
 import { openDatabaseAsync } from 'expo-sqlite';
 import type { SQLiteDatabase } from 'expo-sqlite';
-import { useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import {
-  AccessibilityInfo, ActivityIndicator, Alert, BackHandler, findNodeHandle, Image,
-  Pressable, ScrollView, StatusBar, StyleSheet, Switch, Text, TextInput, View,
+  AccessibilityInfo, ActivityIndicator, Alert, Appearance, BackHandler, findNodeHandle, Image, Linking,
+  Pressable, ScrollView, StatusBar, StyleSheet, Switch, Text, TextInput, useColorScheme, View,
 } from 'react-native';
 import type { ImageSourcePropType } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import {
-  deleteStory, initialize, loadLibrary, loadSettings, loadStory, saveProgress, saveSettings, saveStory, setFavorite,
+  deleteStory, initialize, loadAppSettings, loadLibrary, loadSettings, loadStory, saveAppSettings, saveProgress, saveSettings, saveStory, setFavorite, themeOptions,
 } from './src/database';
-import type { Draft, Listing, ReadingSettings, Scene } from './src/database';
+import type { AppSettings, Draft, Listing, ReadingSettings, Scene } from './src/database';
+import { languages, translate } from './src/i18n';
+import type { Language, Message } from './src/i18n';
+
+const developerEmail = 'valdenor.sa@proton.me';
+const catalogCategories = new Map<string, Message>([
+  ['Saúde', 'health'], ['Bem-estar', 'wellbeing'], ['Trabalho', 'work'],
+  ['Transporte', 'transport'], ['Dia a dia', 'dailyLife'], ['Convivência', 'socialLife'],
+]);
 
 const illustrations: Record<string, ImageSourcePropType> = {
   calendar: require('./assets/calendar.png'),
@@ -23,9 +31,9 @@ const illustrations: Record<string, ImageSourcePropType> = {
 };
 
 const illustrationOptions = [
-  ['', 'Sem ilustração'], ['calendar', 'Calendário'], ['door', 'Porta'], ['chair', 'Cadeira'],
-  ['pause', 'Pausa'], ['done', 'Conclusão'], ['sound', 'Som'], ['note', 'Anotação'],
-];
+  ['', 'noImage'], ['calendar', 'calendar'], ['door', 'door'], ['chair', 'chair'],
+  ['pause', 'pause'], ['done', 'done'], ['sound', 'sound'], ['note', 'note'],
+] as const;
 const emptyScene: Scene = { illustration: '', title: '', text: '' };
 type EditorScene = Scene & { key: number };
 type Editor = Omit<Draft, 'scenes'> & { id?: string; scenes: EditorScene[] };
@@ -34,17 +42,23 @@ function searchable(text: string) {
   return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 }
 type Reader = { story: Listing; scenes: Scene[]; position: number };
-const theme = {
+const lightTheme = {
   ink: '#19263E', muted: '#42546E', accent: '#214B73', canvas: '#F4F7FC',
-  white: '#FFFFFF', line: '#BBC9D9', pale: '#E3EDF7',
+  surface: '#FFFFFF', onAccent: '#FFFFFF', line: '#BBC9D9', pale: '#E3EDF7', error: '#8A2838',
 };
 
-function Button({ label, action, secondary, disabled, accessibilityLabel }: {
-  label: string; action: () => void; secondary?: boolean; disabled?: boolean; accessibilityLabel?: string;
+const darkTheme: typeof lightTheme = {
+  ink: '#F2F5FC', muted: '#B8C6DC', accent: '#9CCBFF', canvas: '#111827',
+  surface: '#202C40', onAccent: '#122847', line: '#6E819D', pale: '#2C3E58', error: '#FFB3BD',
+};
+
+function Button({ label, action, secondary, disabled, accessibilityLabel, role = 'button' }: {
+  label: string; action: () => void; secondary?: boolean; disabled?: boolean; accessibilityLabel?: string; role?: 'button' | 'link';
 }) {
+  const styles = useContext(StylesContext);
   return (
     <Pressable
-      accessibilityRole="button"
+      accessibilityRole={role}
       accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled: !!disabled }}
       disabled={disabled}
@@ -59,6 +73,10 @@ function Button({ label, action, secondary, disabled, accessibilityLabel }: {
 }
 
 export default function App() {
+  return <SafeAreaProvider><AppContent /></SafeAreaProvider>;
+}
+
+function AppContent() {
   const db = useRef<SQLiteDatabase | null>(null);
   const pending = useRef(false);
   const heading = useRef<Text>(null);
@@ -72,16 +90,23 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [settings, setSettings] = useState<ReadingSettings>({ large_text: 0, hide_images: 0 });
+  const [appSettings, setAppSettings] = useState<AppSettings>({ language: 'pt', theme: 'light' });
+  const systemScheme = useColorScheme();
+  const dark = appSettings.theme === 'dark' || (appSettings.theme === 'system' && systemScheme === 'dark');
+  const theme = dark ? darkTheme : lightTheme;
+  const styles = dark ? darkStyles : lightStyles;
+  const t = (message: Message, values?: Record<string, string | number>) =>
+    translate(appSettings.language, message, values);
   const editorChanged = useRef(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<Message | null>(null);
   const moveFocus = useRef(false);
 
-  async function perform(action: () => Promise<void>, message: string) {
+  async function perform(action: () => Promise<void>, message: Message) {
     if (pending.current) return;
     pending.current = true;
     setBusy(true);
-    setError('');
+    setError(null);
     try {
       await action();
     } catch {
@@ -97,11 +122,15 @@ export default function App() {
       db.current ??= await openDatabaseAsync('tea-historias.db');
       await initialize(db.current);
       setSettings(await loadSettings(db.current));
+      setAppSettings(await loadAppSettings(db.current));
       setLibrary(await loadLibrary(db.current));
-    }, 'Não foi possível abrir a biblioteca. Tente novamente.');
+    }, 'libraryError');
   }
 
   useEffect(start, []);
+  useEffect(() => {
+    Appearance.setColorScheme(appSettings.theme === 'system' ? 'unspecified' : appSettings.theme);
+  }, [appSettings.theme]);
 
   const reading = reader !== null;
   const scenePosition = reader?.position;
@@ -120,7 +149,7 @@ export default function App() {
 
   function leave() {
     if (pending.current) return;
-    setError('');
+    setError(null);
     moveFocus.current = true;
     setReader(null);
   }
@@ -128,9 +157,9 @@ export default function App() {
   function closePanel() {
     if (pending.current) return;
     if (editing && editorChanged.current) {
-      Alert.alert('Descartar as alterações?', 'As mudanças desta edição ainda não foram salvas.', [
-        { text: 'Continuar editando', style: 'cancel' },
-        { text: 'Descartar', style: 'destructive', onPress: returnToLibrary },
+      Alert.alert(t('discardQuestion'), t('unsaved'), [
+        { text: t('keepEditing'), style: 'cancel' },
+        { text: t('discard'), style: 'destructive', onPress: returnToLibrary },
       ]);
       return;
     }
@@ -139,7 +168,7 @@ export default function App() {
 
   function returnToLibrary() {
     moveFocus.current = true;
-    setError('');
+    setError(null);
     setEditor(null);
     setShowSettings(false);
   }
@@ -152,7 +181,7 @@ export default function App() {
       return true;
     });
     return () => subscription.remove();
-  }, [reading, editing, showSettings]);
+  }, [reading, editing, showSettings, appSettings.language]);
 
   function edit(story?: Listing) {
     const database = db.current;
@@ -165,7 +194,7 @@ export default function App() {
       editorChanged.current = false;
       moveFocus.current = true;
       setEditor(draft);
-    }, 'Não foi possível abrir o editor. Tente novamente.');
+    }, 'editorError');
   }
 
   function keyScene(scene: Scene): EditorScene {
@@ -182,22 +211,22 @@ export default function App() {
     scenes[destination] = moved;
     updateDraft({ scenes });
     AccessibilityInfo.announceForAccessibility(
-      `${moved.title.trim() || 'Cena'} agora na posição ${destination + 1} de ${scenes.length}.`,
+      t('sceneMoved', { name: moved.title.trim() || t('scene', { n: index + 1 }), n: destination + 1, total: scenes.length }),
     );
   }
 
   function confirmDelete(story: Listing) {
     const database = db.current;
     if (!database || !story.custom || pending.current) return;
-    Alert.alert('Excluir história?', `“${story.title}” e seu progresso serão apagados deste dispositivo.`, [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Excluir', style: 'destructive', onPress: () => {
+    Alert.alert(t('deleteQuestion'), t('deleteDetails', { title: story.title }), [
+      { text: t('cancel'), style: 'cancel' },
+      { text: t('delete'), style: 'destructive', onPress: () => {
         void perform(async () => {
           await deleteStory(database, story.id);
           const updated = await loadLibrary(database);
           setLibrary(updated);
           if (!updated.some((item) => item.category === category)) setCategory(null);
-        }, 'Não foi possível excluir a história. Tente novamente.');
+        }, 'deleteError');
       } },
     ], { cancelable: true });
   }
@@ -213,7 +242,7 @@ export default function App() {
     if (!editor || !database) return;
     if (!editor.title.trim() || !editor.category.trim() ||
         editor.scenes.some(({ title, text }) => !title.trim() || !text.trim())) {
-      setError('Preencha o título, a categoria e o título e texto de cada cena.');
+      setError('required');
       scroller.current?.scrollTo({ y: 0, animated: false });
       return;
     }
@@ -224,7 +253,7 @@ export default function App() {
       setQuery('');
       setFavoriteOnly(false);
       returnToLibrary();
-    }, 'Não foi possível salvar a história. Tente novamente.');
+    }, 'saveError');
   }
 
   function toggleFavorite(story: Listing) {
@@ -234,7 +263,7 @@ export default function App() {
       await setFavorite(database, story.id, !story.favorite);
       setLibrary((current) => current?.map((item) =>
         item.id === story.id ? { ...item, favorite: Number(!story.favorite) } : item) ?? null);
-    }, 'Não foi possível atualizar os favoritos. Tente novamente.');
+    }, 'favoriteError');
   }
 
   function changeSetting(key: keyof ReadingSettings, value: boolean) {
@@ -244,7 +273,22 @@ export default function App() {
     void perform(async () => {
       await saveSettings(database, updated);
       setSettings(updated);
-    }, 'Não foi possível salvar a preferência. Tente novamente.');
+    }, 'savePreferenceError');
+  }
+
+  function changeAppearance(update: Partial<AppSettings>) {
+    const database = db.current;
+    if (!database) return;
+    const updated = { ...appSettings, ...update };
+    void perform(async () => {
+      await saveAppSettings(database, updated);
+      setAppSettings(updated);
+    }, 'savePreferenceError');
+  }
+
+  function contactDeveloper() {
+    setError(null);
+    void Linking.openURL(`mailto:${developerEmail}`).catch(() => setError('emailError'));
   }
 
   function open(story: Listing) {
@@ -254,7 +298,7 @@ export default function App() {
       const saved = await loadStory(database, story.id);
       moveFocus.current = true;
       setReader({ story, ...saved });
-    }, 'Não foi possível abrir esta história. Tente novamente.');
+    }, 'storyError');
   }
 
   function goTo(position: number) {
@@ -265,82 +309,109 @@ export default function App() {
       await saveProgress(database, reader.story.id, finished ? reader.position : position, finished);
       moveFocus.current = true;
       setReader(finished ? null : { ...reader, position });
-    }, 'Não foi possível salvar a leitura. Tente novamente.');
+    }, 'progressError');
   }
 
   const scene = reader?.scenes[reader.position];
   const categories = [...new Set(library?.map((story) => story.category))];
   const search = searchable(query);
+  function categoryLabel(name: string) {
+    const message = catalogCategories.get(name);
+    return message ? t(message) : name;
+  }
   const visible = library?.filter((story) =>
     (category === null || story.category === category) &&
     (!favoriteOnly || !!story.favorite) &&
-    searchable(`${story.title} ${story.category}`).includes(search));
+    searchable(`${story.title} ${story.category} ${categoryLabel(story.category)}`).includes(search));
 
   return (
-    <SafeAreaProvider>
+    <StylesContext.Provider value={styles}>
       <SafeAreaView style={styles.safe}>
-        <StatusBar barStyle="dark-content" />
+        <StatusBar barStyle={dark ? 'light-content' : 'dark-content'} />
         <ScrollView ref={scroller} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-          {error ? <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
+          {error ? <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{t(error)}</Text> : null}
           {editor ? (
             <>
-              <Button label="Voltar à biblioteca" action={closePanel} secondary disabled={busy} />
+              <Button label={t('back')} action={closePanel} secondary disabled={busy} />
               <Text accessible ref={heading} accessibilityRole="header" style={styles.heading}>
-                {editor.id ? 'Editar história' : 'Nova história'}
+                {editor.id ? t('editStory') : t('newStory')}
               </Text>
-              <Field label="Título da história" value={editor.title} change={(title) => updateDraft({ title })} />
-              <Field label="Categoria" value={editor.category} change={(category) => updateDraft({ category })} />
+              <Field label={t('title')} value={editor.title} change={(title) => updateDraft({ title })} />
+              <Field label={t('category')} value={editor.category} change={(category) => updateDraft({ category })} />
               {editor.scenes.map((item, index) => {
                 const updateScene = (patch: Partial<Scene>) => updateDraft({
                   scenes: editor.scenes.map((entry, position) => position === index ? { ...entry, ...patch } : entry),
                 });
-                const label = `Cena ${index + 1}`;
+                const label = t('scene', { n: index + 1 });
                 return (
                   <View key={item.key} style={styles.card}>
                     <Text accessibilityRole="header" style={styles.cardTitle}>{label}</Text>
-                    <Field label={`Título da cena ${index + 1}`} value={item.title}
+                    <Field label={t('sceneTitle', { n: index + 1 })} value={item.title}
                       change={(title) => updateScene({ title })} />
-                    <Field label={`Texto da cena ${index + 1}`} value={item.text} multiline
+                    <Field label={t('sceneText', { n: index + 1 })} value={item.text} multiline
                       change={(text) => updateScene({ text })} />
-                    <Text style={styles.caption}>Ilustração da cena {index + 1}</Text>
+                    <Text style={styles.caption}>{t('sceneIllustration', { n: index + 1 })}</Text>
                     <View style={styles.categories}>
                       {illustrationOptions.map(([value, name]) => (
-                        <Choice key={value} label={name} selected={item.illustration === value}
+                        <Choice key={value} label={t(name)} selected={item.illustration === value}
                           action={() => updateScene({ illustration: value })} />
                       ))}
                     </View>
                     {editor.scenes.length > 1 && (
                       <View style={styles.categories}>
-                        <Button label={`Subir cena ${index + 1}`} secondary
+                        <Button label={t('moveUp', { n: index + 1 })} secondary
                           disabled={busy || index === 0} action={() => moveScene(index, -1)} />
-                        <Button label={`Descer cena ${index + 1}`} secondary
+                        <Button label={t('moveDown', { n: index + 1 })} secondary
                           disabled={busy || index === editor.scenes.length - 1} action={() => moveScene(index, 1)} />
                       </View>
                     )}
-                    {editor.scenes.length > 1 && <Button label={`Remover cena ${index + 1}`} secondary
+                    {editor.scenes.length > 1 && <Button label={t('removeScene', { n: index + 1 })} secondary
                       action={() => updateDraft({ scenes: editor.scenes.filter((_, position) => index !== position) })} />}
                   </View>
                 );
               })}
-              <Button label="Adicionar cena" secondary action={() => updateDraft({ scenes: [...editor.scenes, keyScene(emptyScene)] })} />
-              <Button label="Salvar história" action={submit} disabled={busy} />
+              <Button label={t('addScene')} secondary action={() => updateDraft({ scenes: [...editor.scenes, keyScene(emptyScene)] })} />
+              <Button label={t('save')} action={submit} disabled={busy} />
             </>
           ) : showSettings ? (
             <>
-              <Button label="Voltar à biblioteca" action={closePanel} secondary disabled={busy} />
-              <Text accessible ref={heading} accessibilityRole="header" style={styles.heading}>Ajustes de leitura</Text>
-              <Setting label="Texto maior" value={!!settings.large_text} disabled={busy}
+              <Button label={t('back')} action={closePanel} secondary disabled={busy} />
+              <Text accessible ref={heading} accessibilityRole="header" style={styles.heading}>{t('settings')}</Text>
+              <View style={styles.card}>
+                <Text accessibilityRole="header" style={styles.cardTitle}>{t('language')}</Text>
+                <View style={styles.categories}>
+                  {(Object.keys(languages) as Language[]).map((language) => (
+                    <Choice key={language} label={languages[language]} selected={appSettings.language === language}
+                      disabled={busy} action={() => changeAppearance({ language })} />
+                  ))}
+                </View>
+              </View>
+              <View style={styles.card}>
+                <Text accessibilityRole="header" style={styles.cardTitle}>{t('theme')}</Text>
+                <View style={styles.categories}>
+                  {themeOptions.map((mode) => (
+                    <Choice key={mode} label={t(mode)} selected={appSettings.theme === mode}
+                      disabled={busy} action={() => changeAppearance({ theme: mode })} />
+                  ))}
+                </View>
+              </View>
+              <Text accessibilityRole="header" style={styles.cardTitle}>{t('reading')}</Text>
+              <Setting label={t('larger')} value={!!settings.large_text} disabled={busy}
                 change={(value) => changeSetting('large_text', value)} />
-              <Setting label="Ocultar ilustrações" value={!!settings.hide_images} disabled={busy}
+              <Setting label={t('hide')} value={!!settings.hide_images} disabled={busy}
                 change={(value) => changeSetting('hide_images', value)} />
+              <View style={styles.card}>
+                <Text accessibilityRole="header" style={styles.cardTitle}>{t('contact')}</Text>
+                <Button role="link" label={developerEmail} action={contactDeveloper} secondary />
+              </View>
             </>
           ) : reader && scene ? (
             <>
-              <Button label="Voltar à biblioteca" action={leave} secondary disabled={busy} />
+              <Button label={t('back')} action={leave} secondary disabled={busy} />
               <Text style={styles.storyTitle}>{reader.story.title}</Text>
-              <Text importantForAccessibility="no" style={styles.caption}>Cena {reader.position + 1} de {reader.scenes.length}</Text>
+              <Text importantForAccessibility="no" style={styles.caption}>{t('scenePosition', { n: reader.position + 1, total: reader.scenes.length })}</Text>
               <Text accessible ref={heading} accessibilityRole="header"
-                accessibilityLabel={`Cena ${reader.position + 1} de ${reader.scenes.length}. ${scene.title}`}
+                accessibilityLabel={`${t('scenePosition', { n: reader.position + 1, total: reader.scenes.length })}. ${scene.title}`}
                 style={[styles.heading, settings.large_text ? styles.largeHeading : null]}>{scene.title}</Text>
               {!settings.hide_images && illustrations[scene.illustration] && (
                 <Image accessible={false} source={illustrations[scene.illustration]} style={styles.illustration} />
@@ -348,10 +419,10 @@ export default function App() {
               <Text style={[styles.body, settings.large_text ? styles.largeBody : null]}>{scene.text}</Text>
               <View style={styles.controls}>
                 {reader.position > 0 && (
-                  <Button label="Cena anterior" action={() => goTo(reader.position - 1)} secondary disabled={busy} />
+                  <Button label={t('previous')} action={() => goTo(reader.position - 1)} secondary disabled={busy} />
                 )}
                 <Button
-                  label={reader.position === reader.scenes.length - 1 ? 'Concluir história' : 'Próxima cena'}
+                  label={reader.position === reader.scenes.length - 1 ? t('finish') : t('next')}
                   action={() => goTo(reader.position + 1)}
                   disabled={busy}
                 />
@@ -363,23 +434,23 @@ export default function App() {
                 <Image accessible={false} source={require('./assets/icon.png')} style={styles.logo} />
                 <Text style={styles.storyTitle}>TEA Histórias</Text>
               </View>
-              <Text accessible ref={heading} accessibilityRole="header" style={styles.heading}>Biblioteca</Text>
+              <Text accessible ref={heading} accessibilityRole="header" style={styles.heading}>{t('library')}</Text>
               {library ? (
                 <>
                   <View style={styles.categories}>
-                    <Button label="Nova história" action={() => edit()} disabled={busy} />
-                    <Button label="Ajustes de leitura" action={() => {
-                      setError('');
+                    <Button label={t('newStory')} action={() => edit()} disabled={busy} />
+                    <Button label={t('settings')} action={() => {
+                      setError(null);
                       moveFocus.current = true;
                       setShowSettings(true);
                     }} secondary disabled={busy} />
                   </View>
-                  <Field label="Buscar histórias" value={query} change={setQuery} />
+                  <Field label={t('search')} value={query} change={setQuery} />
                   <View style={styles.categories}>
-                    <Choice label="Todas" selected={category === null} action={() => setCategory(null)} />
-                    <Choice label="Favoritos" selected={favoriteOnly} action={() => setFavoriteOnly(!favoriteOnly)} />
+                    <Choice label={t('all')} selected={category === null} action={() => setCategory(null)} />
+                    <Choice label={t('favorites')} selected={favoriteOnly} action={() => setFavoriteOnly(!favoriteOnly)} />
                     {categories.map((name) => (
-                      <Choice key={name} label={name === 'Todas' ? 'Categoria Todas' : name} selected={category === name} action={() => setCategory(name)} />
+                      <Choice key={name} label={name === 'Todas' ? `${t('category')} ${name}` : categoryLabel(name)} selected={category === name} action={() => setCategory(name)} />
                     ))}
                   </View>
                   {visible?.map((story) => (
@@ -388,40 +459,41 @@ export default function App() {
                         accessibilityState={{ disabled: busy }}
                         style={({ pressed }) => [styles.storyLink, pressed && styles.pressed]}
                         onPress={() => open(story)}>
-                        <Text style={styles.caption}>{story.category} · {story.count} {story.count === 1 ? 'cena' : 'cenas'}</Text>
+                        <Text style={styles.caption}>{categoryLabel(story.category)} · {t(story.count === 1 ? 'sceneCount' : 'scenesCount', { n: story.count })}</Text>
                         <Text style={styles.cardTitle}>{story.title}</Text>
                       </Pressable>
                       <View style={styles.categories}>
-                        <Choice label={story.favorite ? 'Remover dos favoritos' : 'Favoritar'}
-                          accessibilityLabel={`${story.favorite ? 'Remover dos favoritos' : 'Favoritar'}: ${story.title}`}
+                        <Choice label={story.favorite ? t('unfavorite') : t('favorite')}
+                          accessibilityLabel={`${story.favorite ? t('unfavorite') : t('favorite')}: ${story.title}`}
                           selected={!!story.favorite} disabled={busy} action={() => toggleFavorite(story)} />
                         {!!story.custom && (
                           <>
-                            <Button label="Editar história" accessibilityLabel={`Editar história: ${story.title}`}
+                            <Button label={t('editStory')} accessibilityLabel={`${t('editStory')}: ${story.title}`}
                               action={() => edit(story)} secondary disabled={busy} />
-                            <Button label="Excluir história" accessibilityLabel={`Excluir história: ${story.title}`}
+                            <Button label={t('deleteStory')} accessibilityLabel={`${t('deleteStory')}: ${story.title}`}
                               action={() => confirmDelete(story)} secondary disabled={busy} />
                           </>
                         )}
                       </View>
                     </View>
                   ))}
-                  {!visible?.length && <Text style={styles.caption}>Nenhuma história neste filtro.</Text>}
+                  {!visible?.length && <Text style={styles.caption}>{t('empty')}</Text>}
                 </>
               ) : busy || !error ? (
-                <ActivityIndicator accessibilityLabel="Carregando biblioteca" color={theme.accent} />
-              ) : <Button label="Tentar novamente" action={start} />}
+                <ActivityIndicator accessibilityLabel={t('loading')} color={theme.accent} />
+              ) : <Button label={t('retry')} action={start} />}
             </>
           )}
         </ScrollView>
       </SafeAreaView>
-    </SafeAreaProvider>
+    </StylesContext.Provider>
   );
 }
 
 function Choice({ label, selected, action, accessibilityLabel, disabled }: {
   label: string; selected: boolean; action: () => void; accessibilityLabel?: string; disabled?: boolean;
 }) {
+  const styles = useContext(StylesContext);
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel}
       accessibilityState={{ selected, disabled }} disabled={disabled} onPress={action}
@@ -434,6 +506,7 @@ function Choice({ label, selected, action, accessibilityLabel, disabled }: {
 function Setting({ label, value, disabled, change }: {
   label: string; value: boolean; disabled: boolean; change: (value: boolean) => void;
 }) {
+  const styles = useContext(StylesContext);
   return (
     <Pressable style={styles.setting} accessibilityLabel={label} accessibilityRole="switch"
       accessibilityState={{ checked: value, disabled }} disabled={disabled} onPress={() => change(!value)}>
@@ -448,6 +521,7 @@ function Setting({ label, value, disabled, change }: {
 function Field({ label, value, change, multiline }: {
   label: string; value: string; change: (value: string) => void; multiline?: boolean;
 }) {
+  const styles = useContext(StylesContext);
   return (
     <View style={styles.storyLink}>
       <Text importantForAccessibility="no" style={styles.caption}>{label}</Text>
@@ -457,50 +531,56 @@ function Field({ label, value, change, multiline }: {
   );
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: theme.canvas },
-  content: { padding: 20, gap: 16, width: '100%', maxWidth: 640, alignSelf: 'center' },
-  brand: { flexDirection: 'row', gap: 12, alignItems: 'center' },
-  logo: { width: 46, height: 46, borderRadius: 12 },
-  storyTitle: { color: theme.accent, fontSize: 19, fontWeight: '700', flexShrink: 1 },
-  heading: { color: theme.ink, fontSize: 31, fontWeight: '700' },
-  caption: { color: theme.muted, fontSize: 15, fontWeight: '500' },
-  cardTitle: { color: theme.ink, fontSize: 21, fontWeight: '700' },
-  body: { color: theme.ink, fontSize: 22, lineHeight: 33 },
-  largeHeading: { fontSize: 37 },
-  largeBody: { fontSize: 29, lineHeight: 42 },
-  storyLink: { gap: 6 },
-  input: {
-    minHeight: 48, backgroundColor: theme.white, borderWidth: 1, borderColor: theme.line,
-    borderRadius: 10, color: theme.ink, fontSize: 18, paddingHorizontal: 12, paddingVertical: 10,
-  },
-  multiline: { minHeight: 108, textAlignVertical: 'top' },
-  settingLabel: { flexShrink: 1 },
-  setting: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-    backgroundColor: theme.white, padding: 12, borderRadius: 12,
-  },
-  categories: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: {
-    backgroundColor: theme.white, borderColor: theme.line, borderWidth: 1, minHeight: 48,
-    justifyContent: 'center', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 8,
-  },
-  selectedChip: { backgroundColor: theme.accent, borderColor: theme.accent },
-  chipText: { color: theme.accent, fontSize: 16, fontWeight: '600' },
-  card: {
-    backgroundColor: theme.white, borderColor: theme.line, borderWidth: 1,
-    borderRadius: 17, padding: 18, gap: 6,
-  },
-  illustration: { width: '100%', height: 160, borderRadius: 16, backgroundColor: theme.pale, resizeMode: 'contain' },
-  controls: { gap: 10 },
-  button: {
-    backgroundColor: theme.accent, minHeight: 48, borderRadius: 12,
-    justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12,
-  },
-  secondary: { backgroundColor: theme.white, borderColor: theme.line, borderWidth: 1 },
-  buttonText: { color: theme.white, fontSize: 16, fontWeight: '700', textAlign: 'center' },
-  secondaryText: { color: theme.accent },
-  pressed: { opacity: 0.75 },
-  disabled: { opacity: 0.6 },
-  error: { color: '#8A2838', fontSize: 16 },
-});
+function createStyles(theme: typeof lightTheme) {
+  return StyleSheet.create({
+    safe: { flex: 1, backgroundColor: theme.canvas },
+    content: { padding: 20, gap: 16, width: '100%', maxWidth: 640, alignSelf: 'center' },
+    brand: { flexDirection: 'row', gap: 12, alignItems: 'center' },
+    logo: { width: 46, height: 46, borderRadius: 12 },
+    storyTitle: { color: theme.accent, fontSize: 19, fontWeight: '700', flexShrink: 1 },
+    heading: { color: theme.ink, fontSize: 31, fontWeight: '700' },
+    caption: { color: theme.muted, fontSize: 15, fontWeight: '500' },
+    cardTitle: { color: theme.ink, fontSize: 21, fontWeight: '700' },
+    body: { color: theme.ink, fontSize: 22, lineHeight: 33 },
+    largeHeading: { fontSize: 37 },
+    largeBody: { fontSize: 29, lineHeight: 42 },
+    storyLink: { gap: 6 },
+    input: {
+      minHeight: 48, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.line,
+      borderRadius: 10, color: theme.ink, fontSize: 18, paddingHorizontal: 12, paddingVertical: 10,
+    },
+    multiline: { minHeight: 108, textAlignVertical: 'top' },
+    settingLabel: { flexShrink: 1 },
+    setting: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+      backgroundColor: theme.surface, padding: 12, borderRadius: 12,
+    },
+    categories: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    chip: {
+      backgroundColor: theme.surface, borderColor: theme.line, borderWidth: 1, minHeight: 48,
+      justifyContent: 'center', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 8,
+    },
+    selectedChip: { backgroundColor: theme.accent, borderColor: theme.accent },
+    chipText: { color: theme.accent, fontSize: 16, fontWeight: '600' },
+    card: {
+      backgroundColor: theme.surface, borderColor: theme.line, borderWidth: 1,
+      borderRadius: 17, padding: 18, gap: 6,
+    },
+    illustration: { width: '100%', height: 160, borderRadius: 16, backgroundColor: theme.pale, resizeMode: 'contain' },
+    controls: { gap: 10 },
+    button: {
+      backgroundColor: theme.accent, minHeight: 48, borderRadius: 12,
+      justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12,
+    },
+    secondary: { backgroundColor: theme.surface, borderColor: theme.line, borderWidth: 1 },
+    buttonText: { color: theme.onAccent, fontSize: 16, fontWeight: '700', textAlign: 'center' },
+    secondaryText: { color: theme.accent },
+    pressed: { opacity: 0.75 },
+    disabled: { opacity: 0.6 },
+    error: { color: theme.error, fontSize: 16 },
+  });
+}
+
+const lightStyles = createStyles(lightTheme);
+const darkStyles = createStyles(darkTheme);
+const StylesContext = createContext(lightStyles);
