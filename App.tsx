@@ -8,7 +8,7 @@ import {
 import type { ImageSourcePropType } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import {
-  initialize, loadLibrary, loadSettings, loadStory, saveProgress, saveSettings, saveStory, setFavorite,
+  deleteStory, initialize, loadLibrary, loadSettings, loadStory, saveProgress, saveSettings, saveStory, setFavorite,
 } from './src/database';
 import type { Draft, Listing, ReadingSettings, Scene } from './src/database';
 
@@ -27,19 +27,25 @@ const illustrationOptions = [
   ['pause', 'Pausa'], ['done', 'Conclusão'], ['sound', 'Som'], ['note', 'Anotação'],
 ];
 const emptyScene: Scene = { illustration: '', title: '', text: '' };
-type Editor = Draft & { id?: string };
+type EditorScene = Scene & { key: number };
+type Editor = Omit<Draft, 'scenes'> & { id?: string; scenes: EditorScene[] };
+
+function searchable(text: string) {
+  return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
 type Reader = { story: Listing; scenes: Scene[]; position: number };
 const theme = {
   ink: '#19263E', muted: '#42546E', accent: '#214B73', canvas: '#F4F7FC',
   white: '#FFFFFF', line: '#BBC9D9', pale: '#E3EDF7',
 };
 
-function Button({ label, action, secondary, disabled }: {
-  label: string; action: () => void; secondary?: boolean; disabled?: boolean;
+function Button({ label, action, secondary, disabled, accessibilityLabel }: {
+  label: string; action: () => void; secondary?: boolean; disabled?: boolean; accessibilityLabel?: string;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled: !!disabled }}
       disabled={disabled}
       onPress={action}
@@ -59,7 +65,9 @@ export default function App() {
   const scroller = useRef<ScrollView>(null);
   const [library, setLibrary] = useState<Listing[] | null>(null);
   const [reader, setReader] = useState<Reader | null>(null);
-  const [category, setCategory] = useState('Todas');
+  const [category, setCategory] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const nextSceneKey = useRef(0);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [favoriteOnly, setFavoriteOnly] = useState(false);
@@ -152,15 +160,49 @@ export default function App() {
     void perform(async () => {
       const draft = story ? {
         id: story.id, title: story.title, category: story.category,
-        scenes: (await loadStory(database, story.id)).scenes,
-      } : { title: '', category: '', scenes: [{ ...emptyScene }] };
+        scenes: (await loadStory(database, story.id)).scenes.map(keyScene),
+      } : { title: '', category: '', scenes: [keyScene(emptyScene)] };
       editorChanged.current = false;
       moveFocus.current = true;
       setEditor(draft);
     }, 'Não foi possível abrir o editor. Tente novamente.');
   }
 
-  function updateDraft(update: Partial<Draft>) {
+  function keyScene(scene: Scene): EditorScene {
+    return { ...scene, key: nextSceneKey.current++ };
+  }
+
+  function moveScene(index: number, offset: -1 | 1) {
+    if (!editor || pending.current) return;
+    const destination = index + offset;
+    if (destination < 0 || destination >= editor.scenes.length) return;
+    const scenes = [...editor.scenes];
+    const moved = scenes[index];
+    scenes[index] = scenes[destination];
+    scenes[destination] = moved;
+    updateDraft({ scenes });
+    AccessibilityInfo.announceForAccessibility(
+      `${moved.title.trim() || 'Cena'} agora na posição ${destination + 1} de ${scenes.length}.`,
+    );
+  }
+
+  function confirmDelete(story: Listing) {
+    const database = db.current;
+    if (!database || !story.custom || pending.current) return;
+    Alert.alert('Excluir história?', `“${story.title}” e seu progresso serão apagados deste dispositivo.`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Excluir', style: 'destructive', onPress: () => {
+        void perform(async () => {
+          await deleteStory(database, story.id);
+          const updated = await loadLibrary(database);
+          setLibrary(updated);
+          if (!updated.some((item) => item.category === category)) setCategory(null);
+        }, 'Não foi possível excluir a história. Tente novamente.');
+      } },
+    ], { cancelable: true });
+  }
+
+  function updateDraft(update: Partial<Editor>) {
     if (!editor || pending.current) return;
     editorChanged.current = true;
     setEditor({ ...editor, ...update });
@@ -178,7 +220,8 @@ export default function App() {
     void perform(async () => {
       await saveStory(database, editor, editor.id);
       setLibrary(await loadLibrary(database));
-      setCategory('Todas');
+      setCategory(null);
+      setQuery('');
       setFavoriteOnly(false);
       returnToLibrary();
     }, 'Não foi possível salvar a história. Tente novamente.');
@@ -226,9 +269,12 @@ export default function App() {
   }
 
   const scene = reader?.scenes[reader.position];
-  const categories = ['Todas', ...new Set(library?.map((story) => story.category).filter((name) => name !== 'Todas'))];
+  const categories = [...new Set(library?.map((story) => story.category))];
+  const search = searchable(query);
   const visible = library?.filter((story) =>
-    (category === 'Todas' || story.category === category) && (!favoriteOnly || !!story.favorite));
+    (category === null || story.category === category) &&
+    (!favoriteOnly || !!story.favorite) &&
+    searchable(`${story.title} ${story.category}`).includes(search));
 
   return (
     <SafeAreaProvider>
@@ -250,7 +296,7 @@ export default function App() {
                 });
                 const label = `Cena ${index + 1}`;
                 return (
-                  <View key={index} style={styles.card}>
+                  <View key={item.key} style={styles.card}>
                     <Text accessibilityRole="header" style={styles.cardTitle}>{label}</Text>
                     <Field label={`Título da cena ${index + 1}`} value={item.title}
                       change={(title) => updateScene({ title })} />
@@ -263,12 +309,20 @@ export default function App() {
                           action={() => updateScene({ illustration: value })} />
                       ))}
                     </View>
+                    {editor.scenes.length > 1 && (
+                      <View style={styles.categories}>
+                        <Button label={`Subir cena ${index + 1}`} secondary
+                          disabled={busy || index === 0} action={() => moveScene(index, -1)} />
+                        <Button label={`Descer cena ${index + 1}`} secondary
+                          disabled={busy || index === editor.scenes.length - 1} action={() => moveScene(index, 1)} />
+                      </View>
+                    )}
                     {editor.scenes.length > 1 && <Button label={`Remover cena ${index + 1}`} secondary
                       action={() => updateDraft({ scenes: editor.scenes.filter((_, position) => index !== position) })} />}
                   </View>
                 );
               })}
-              <Button label="Adicionar cena" secondary action={() => updateDraft({ scenes: [...editor.scenes, { ...emptyScene }] })} />
+              <Button label="Adicionar cena" secondary action={() => updateDraft({ scenes: [...editor.scenes, keyScene(emptyScene)] })} />
               <Button label="Salvar história" action={submit} disabled={busy} />
             </>
           ) : showSettings ? (
@@ -284,7 +338,7 @@ export default function App() {
             <>
               <Button label="Voltar à biblioteca" action={leave} secondary disabled={busy} />
               <Text style={styles.storyTitle}>{reader.story.title}</Text>
-              <Text style={styles.caption}>Cena {reader.position + 1} de {reader.scenes.length}</Text>
+              <Text importantForAccessibility="no" style={styles.caption}>Cena {reader.position + 1} de {reader.scenes.length}</Text>
               <Text accessible ref={heading} accessibilityRole="header"
                 accessibilityLabel={`Cena ${reader.position + 1} de ${reader.scenes.length}. ${scene.title}`}
                 style={[styles.heading, settings.large_text ? styles.largeHeading : null]}>{scene.title}</Text>
@@ -313,9 +367,19 @@ export default function App() {
               {library ? (
                 <>
                   <View style={styles.categories}>
+                    <Button label="Nova história" action={() => edit()} disabled={busy} />
+                    <Button label="Ajustes de leitura" action={() => {
+                      setError('');
+                      moveFocus.current = true;
+                      setShowSettings(true);
+                    }} secondary disabled={busy} />
+                  </View>
+                  <Field label="Buscar histórias" value={query} change={setQuery} />
+                  <View style={styles.categories}>
+                    <Choice label="Todas" selected={category === null} action={() => setCategory(null)} />
                     <Choice label="Favoritos" selected={favoriteOnly} action={() => setFavoriteOnly(!favoriteOnly)} />
                     {categories.map((name) => (
-                      <Choice key={name} label={name} selected={category === name} action={() => setCategory(name)} />
+                      <Choice key={name} label={name === 'Todas' ? 'Categoria Todas' : name} selected={category === name} action={() => setCategory(name)} />
                     ))}
                   </View>
                   {visible?.map((story) => (
@@ -331,17 +395,18 @@ export default function App() {
                         <Choice label={story.favorite ? 'Remover dos favoritos' : 'Favoritar'}
                           accessibilityLabel={`${story.favorite ? 'Remover dos favoritos' : 'Favoritar'}: ${story.title}`}
                           selected={!!story.favorite} disabled={busy} action={() => toggleFavorite(story)} />
-                        {!!story.custom && <Button label="Editar história" action={() => edit(story)} secondary disabled={busy} />}
+                        {!!story.custom && (
+                          <>
+                            <Button label="Editar história" accessibilityLabel={`Editar história: ${story.title}`}
+                              action={() => edit(story)} secondary disabled={busy} />
+                            <Button label="Excluir história" accessibilityLabel={`Excluir história: ${story.title}`}
+                              action={() => confirmDelete(story)} secondary disabled={busy} />
+                          </>
+                        )}
                       </View>
                     </View>
                   ))}
                   {!visible?.length && <Text style={styles.caption}>Nenhuma história neste filtro.</Text>}
-                  <Button label="Nova história" action={() => edit()} disabled={busy} />
-                  <Button label="Ajustes de leitura" action={() => {
-                    setError('');
-                    moveFocus.current = true;
-                    setShowSettings(true);
-                  }} secondary disabled={busy} />
                 </>
               ) : busy || !error ? (
                 <ActivityIndicator accessibilityLabel="Carregando biblioteca" color={theme.accent} />
@@ -370,10 +435,13 @@ function Setting({ label, value, disabled, change }: {
   label: string; value: boolean; disabled: boolean; change: (value: boolean) => void;
 }) {
   return (
-    <View style={styles.setting}>
-      <Text importantForAccessibility="no" style={styles.cardTitle}>{label}</Text>
-      <Switch accessibilityLabel={label} value={value} disabled={disabled} onValueChange={change} />
-    </View>
+    <Pressable style={styles.setting} accessibilityLabel={label} accessibilityRole="switch"
+      accessibilityState={{ checked: value, disabled }} disabled={disabled} onPress={() => change(!value)}>
+      <Text style={[styles.cardTitle, styles.settingLabel]}>{label}</Text>
+      <View pointerEvents="none" importantForAccessibility="no-hide-descendants">
+        <Switch value={value} disabled={disabled} />
+      </View>
+    </Pressable>
   );
 }
 
@@ -407,6 +475,7 @@ const styles = StyleSheet.create({
     borderRadius: 10, color: theme.ink, fontSize: 18, paddingHorizontal: 12, paddingVertical: 10,
   },
   multiline: { minHeight: 108, textAlignVertical: 'top' },
+  settingLabel: { flexShrink: 1 },
   setting: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12,
     backgroundColor: theme.white, padding: 12, borderRadius: 12,

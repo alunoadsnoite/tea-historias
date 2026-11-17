@@ -2,14 +2,14 @@
   "expo": {
     "name": "TEA Histórias",
     "slug": "tea-historias",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "platforms": [
       "android"
     ],
     "icon": "./assets/icon.png",
     "android": {
       "package": "com.teahistorias.app",
-      "versionCode": 2,
+      "versionCode": 3,
       "allowBackup": false,
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon-foreground.png",

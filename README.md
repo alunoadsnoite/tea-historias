@@ -1,4 +1,4 @@
-# TEA Histórias — Sprint 2
+# TEA Histórias — Sprint 3
 
 Aplicativo Android de histórias sociais em português do Brasil. A biblioteca inclui 14 cenas ilustradas em três histórias. As histórias e a posição de leitura ficam no SQLite do dispositivo. Ao concluir uma história, ela volta à primeira cena na próxima abertura.
 
@@ -6,7 +6,9 @@ Na biblioteca, **Nova história** abre o editor. Dê um título e uma categoria,
 
 Use **Favoritar** em um cartão e **Favoritos** para filtrar a biblioteca. Em **Ajustes de leitura**, é possível aumentar o texto ou ocultar ilustrações. O app salva essas escolhas no dispositivo.
 
-Instale o APK da Sprint 2 sobre o da Sprint 1 para manter o progresso. O banco é atualizado na primeira abertura.
+A busca da biblioteca encontra títulos e categorias mesmo sem acentos. Ela funciona em conjunto com os filtros. No editor, **Subir cena** e **Descer cena** mudam a ordem após salvar. Use **Excluir história** no cartão de uma história própria e confirme a exclusão.
+
+Instale o APK da Sprint 3 sobre o da Sprint 2 para manter o progresso, as histórias próprias, os favoritos e os ajustes.
 
 ## Desenvolver no Fedora
 
@@ -36,6 +38,7 @@ O APK incorpora o código e as imagens. Ele abre diretamente no Android. O proje
 2. Abra cada história e avance pelas cenas. Use o botão de voltar do Android e o botão Voltar à biblioteca.
 3. Em uma cena intermediária, encerre o app e abra a história novamente. Confira a retomada. Conclua a história e confirme que a próxima abertura começa na primeira cena.
 4. Crie uma história com duas cenas, favorite-a e edite-a. Reinicie o app e confira a história, o favorito e os ajustes de leitura.
-5. Com o TalkBack ativo, confira os botões e o anúncio do título ao trocar de cena. Aumente o texto do Android e confirme que as cenas e os controles continuam acessíveis pela rolagem.
+5. Procure uma história pelo título sem acentos. Mova uma cena, salve e confira a nova ordem no leitor. Teste cancelar e confirmar a exclusão de uma história própria.
+6. Com o TalkBack ativo, confira os botões e o anúncio do título ao trocar de cena. Aumente o texto do Android e confirme que as cenas e os controles continuam acessíveis pela rolagem.
 
 O pacote Android é `com.teahistorias.app`. O ícone usa o logotipo aprovado em dois formatos, para a biblioteca e o inicializador Android.

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { initialize, loadLibrary, loadSettings, loadStory, saveProgress, saveSettings, saveStory, setFavorite } from '../src/database.ts';
+import { deleteStory, initialize, loadLibrary, loadSettings, loadStory, saveProgress, saveSettings, saveStory, setFavorite } from '../src/database.ts';
 
 function connect(path: string) {
   const sqlite = new DatabaseSync(path);
@@ -136,6 +136,33 @@ test('permite criar e editar histórias próprias, favoritar e ajustar o leitor'
     await saveSettings(db, { large_text: 1, hide_images: 1 });
     await initialize(db);
     assert.deepEqual({ ...await loadSettings(db) }, { large_text: 1, hide_images: 1 });
+  } finally {
+    close();
+  }
+});
+
+test('salva a nova ordem e exclui somente histórias próprias com seus dados', async () => {
+  const { db, close } = connect(':memory:');
+  const first = { title: 'Primeira', text: 'Começo', illustration: '' };
+  const second = { title: 'Segunda', text: 'Continuação', illustration: 'door' };
+  const draft = { title: 'Rotina', category: 'Casa', scenes: [first, second] };
+  try {
+    await initialize(db);
+    await saveStory(db, draft);
+    const created = (await loadLibrary(db)).find((story) => story.custom);
+    assert.ok(created);
+    await saveStory(db, { ...draft, scenes: [second, first] }, created.id);
+    assert.deepEqual((await loadStory(db, created.id)).scenes.map((scene) => ({ ...scene })), [second, first]);
+    await saveProgress(db, created.id, 1);
+    await setFavorite(db, created.id, true);
+
+    await assert.rejects(deleteStory(db, 'dentista'), /indisponível para exclusão/);
+    await deleteStory(db, created.id);
+    assert.equal(await db.getFirstAsync('SELECT 1 FROM progress WHERE story_id = ?', created.id), null);
+    await assert.rejects(loadStory(db, created.id), /indisponível/);
+    const library = await loadLibrary(db);
+    assert.equal(library.length, 3);
+    assert.ok(library.some((story) => story.id === 'dentista'));
   } finally {
     close();
   }

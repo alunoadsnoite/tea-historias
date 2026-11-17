@@ -124,3 +124,13 @@ export async function saveStory(db: SQLiteDatabase, draft: Draft, id?: string) {
     }
   });
 }
+
+export async function deleteStory(db: SQLiteDatabase, id: string) {
+  await db.withExclusiveTransactionAsync(async (tx) => {
+    const story = await tx.getFirstAsync<{ custom: number }>('SELECT custom FROM stories WHERE id = ?', id);
+    if (!story?.custom) throw new Error('História indisponível para exclusão');
+    await tx.runAsync('DELETE FROM progress WHERE story_id = ?', id);
+    await tx.runAsync('DELETE FROM scenes WHERE story_id = ?', id);
+    await tx.runAsync('DELETE FROM stories WHERE id = ?', id);
+  });
+}
