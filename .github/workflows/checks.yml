@@ -34,10 +34,11 @@ jobs:
           log-accepted-android-sdk-licenses: false
       - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006' 'cmake;3.22.1'
       - uses: gradle/actions/setup-gradle@v4
-      - run: npx --no-install expo prebuild --platform android --no-install
-      - run: bash ./android/gradlew -p android :app:assembleDebug --no-daemon
+      - name: Preparar variante sem assinatura do F-Droid
+        run: sh fdroid/prepare.sh
+      - run: bash ./android/gradlew -p android :app:assembleRelease --no-daemon
       - uses: actions/upload-artifact@v4
         with:
-          name: tea-historias-debug
-          path: android/app/build/outputs/apk/debug/*.apk
+          name: tea-historias-release-unsigned
+          path: android/app/build/outputs/apk/release/*-unsigned.apk
           retention-days: 7

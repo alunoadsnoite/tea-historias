@@ -14,7 +14,7 @@ Repo: https://github.com/alunoadsnoite/tea-historias.git
 Builds:
   - versionName: 1.3.1
     versionCode: 6
-    commit: d6a0d67ce379c83783dd4211abb026d504837f7e
+    commit: a1e0829675b3ff9d51ae672fc39fb806e14d569a
     subdir: android/app
     sudo:
       - apt-get update
