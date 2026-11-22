@@ -1,4 +1,15 @@
-# TEA Histórias — Sprint 3
+# TEA Histórias
+
+**Histórias sociais ilustradas para antecipar situações do dia a dia.**
+
+`React Native · Expo · SQLite`
+
+[Reportar problema](https://github.com/alunoadsnoite/tea-historias/issues) · [Licença](LICENSE)
+
+## Veja o aplicativo
+
+<img src="fastlane/metadata/android/pt-BR/images/phoneScreenshots/1.png" alt="Tela 1 do TEA Histórias" width="240">
+<img src="fastlane/metadata/android/pt-BR/images/phoneScreenshots/2.png" alt="Tela 2 do TEA Histórias" width="240">
 
 Aplicativo Android de histórias sociais em português do Brasil. A biblioteca inclui 35 cenas ilustradas em nove histórias. As histórias e a posição de leitura ficam no SQLite do dispositivo. Ao concluir uma história, ela volta à primeira cena na próxima abertura.
 
@@ -44,3 +55,11 @@ O APK incorpora o código e as imagens. Ele abre diretamente no Android. O proje
 6. Com o TalkBack ativo, confira os botões e o anúncio do título ao trocar de cena. Aumente o texto do Android e confirme que as cenas e os controles continuam acessíveis pela rolagem.
 
 O pacote Android é `com.teahistorias.app`. O ícone usa o logotipo aprovado em dois formatos, para a biblioteca e o inicializador Android.
+
+## Como contribuir
+
+Sugestões, traduções e relatos de problemas são bem-vindos. Abra uma issue com o contexto e o comportamento esperado. Para alterações de código, explique a mudança e os testes realizados no pull request. Use dados fictícios nos exemplos e nas capturas.
+
+## Privacidade e licença
+
+As histórias, o progresso, os favoritos e os ajustes descritos neste README são armazenados no dispositivo. Evite dados pessoais de terceiros nos relatos de problemas. Consulte a [GNU General Public License v3.0](LICENSE).
