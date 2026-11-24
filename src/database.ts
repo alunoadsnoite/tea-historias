@@ -76,6 +76,12 @@ export async function loadLibrary(db: Database) {
   `);
 }
 
+export async function loadIllustrations(db: Database) {
+  const rows = await db.getAllAsync<{ illustration: string }>(
+    'SELECT DISTINCT illustration FROM scenes');
+  return rows.map(({ illustration }) => illustration);
+}
+
 export async function loadStory(db: Database, id: string) {
   const scenes = await db.getAllAsync<Scene>(
     'SELECT illustration, title, text FROM scenes WHERE story_id = ? ORDER BY position', id);

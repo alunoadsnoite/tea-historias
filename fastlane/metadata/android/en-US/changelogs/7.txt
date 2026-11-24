@@ -1,0 +1,1 @@
+Add your own scene photos using the Android picker, with information on storage and deletion.

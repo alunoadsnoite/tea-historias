@@ -13,6 +13,7 @@ import {
 import type { AppSettings, Draft, Listing, ReadingSettings, Scene } from './src/database';
 import { languages, translate } from './src/i18n';
 import type { Language, Message } from './src/i18n';
+import { pickScenePhoto, removeUnusedScenePhotos, scenePhoto } from './src/scene-photos';
 import { getStoryTranslation } from './src/story-translations';
 
 const developerEmail = 'valdenor.sa@proton.me';
@@ -122,6 +123,7 @@ function AppContent() {
     void perform(async () => {
       db.current ??= await openDatabaseAsync('tea-historias.db');
       await initialize(db.current);
+      await removeUnusedScenePhotos(db.current);
       setSettings(await loadSettings(db.current));
       setAppSettings(await loadAppSettings(db.current));
       setLibrary(await loadLibrary(db.current));
@@ -160,7 +162,14 @@ function AppContent() {
     if (editing && editorChanged.current) {
       Alert.alert(t('discardQuestion'), t('unsaved'), [
         { text: t('keepEditing'), style: 'cancel' },
-        { text: t('discard'), style: 'destructive', onPress: returnToLibrary },
+        { text: t('discard'), style: 'destructive', onPress: () => {
+          const database = db.current;
+          if (!database) return;
+          void perform(async () => {
+            await removeUnusedScenePhotos(database);
+            returnToLibrary();
+          }, 'editorError');
+        } },
       ]);
       return;
     }
@@ -224,6 +233,7 @@ function AppContent() {
       { text: t('delete'), style: 'destructive', onPress: () => {
         void perform(async () => {
           await deleteStory(database, story.id);
+          await removeUnusedScenePhotos(database);
           const updated = await loadLibrary(database);
           setLibrary(updated);
           if (!updated.some((item) => item.category === category)) setCategory(null);
@@ -238,6 +248,18 @@ function AppContent() {
     setEditor({ ...editor, ...update });
   }
 
+  function choosePhoto(key: number) {
+    void perform(async () => {
+      const illustration = await pickScenePhoto();
+      if (!illustration) return;
+      editorChanged.current = true;
+      setEditor((current) => current && {
+        ...current,
+        scenes: current.scenes.map((scene) => scene.key === key ? { ...scene, illustration } : scene),
+      });
+    }, 'photoError');
+  }
+
   function submit() {
     const database = db.current;
     if (!editor || !database) return;
@@ -249,6 +271,7 @@ function AppContent() {
     }
     void perform(async () => {
       await saveStory(database, editor, editor.id);
+      await removeUnusedScenePhotos(database);
       setLibrary(await loadLibrary(database));
       setCategory(null);
       setQuery('');
@@ -322,6 +345,7 @@ function AppContent() {
   }
 
   const scene = reader?.scenes[reader.position];
+  const sceneImage = scene && (scenePhoto(scene.illustration) ?? illustrations[scene.illustration]);
   const sceneTranslation = reader && storyTranslation(reader.story)?.scenes[reader.position];
   const sceneTitle = sceneTranslation?.[0] ?? scene?.title;
   const sceneText = sceneTranslation?.[1] ?? scene?.text;
@@ -350,11 +374,13 @@ function AppContent() {
               </Text>
               <Field label={t('title')} value={editor.title} change={(title) => updateDraft({ title })} />
               <Field label={t('category')} value={editor.category} change={(category) => updateDraft({ category })} />
+              <Text style={styles.caption}>{t('photoPrivacy')}</Text>
               {editor.scenes.map((item, index) => {
                 const updateScene = (patch: Partial<Scene>) => updateDraft({
                   scenes: editor.scenes.map((entry, position) => position === index ? { ...entry, ...patch } : entry),
                 });
                 const label = t('scene', { n: index + 1 });
+                const photo = scenePhoto(item.illustration);
                 return (
                   <View key={item.key} style={styles.card}>
                     <Text accessibilityRole="header" style={styles.cardTitle}>{label}</Text>
@@ -369,6 +395,10 @@ function AppContent() {
                           action={() => updateScene({ illustration: value })} />
                       ))}
                     </View>
+                    <Button label={t(photo ? 'changePhoto' : 'choosePhoto')} secondary disabled={busy}
+                      accessibilityLabel={t(photo ? 'changeScenePhoto' : 'chooseScenePhoto', { n: index + 1 })}
+                      action={() => choosePhoto(item.key)} />
+                    {photo && <Image accessible={false} source={photo} style={styles.illustration} />}
                     {editor.scenes.length > 1 && (
                       <View style={styles.categories}>
                         <Button label={t('moveUp', { n: index + 1 })} secondary
@@ -425,8 +455,8 @@ function AppContent() {
               <Text accessible ref={heading} accessibilityRole="header"
                 accessibilityLabel={`${t('scenePosition', { n: reader.position + 1, total: reader.scenes.length })}. ${sceneTitle}`}
                 style={[styles.heading, settings.large_text ? styles.largeHeading : null]}>{sceneTitle}</Text>
-              {!settings.hide_images && illustrations[scene.illustration] && (
-                <Image accessible={false} source={illustrations[scene.illustration]} style={styles.illustration} />
+              {!settings.hide_images && sceneImage && (
+                <Image accessible={false} source={sceneImage} style={styles.illustration} />
               )}
               <Text style={[styles.body, settings.large_text ? styles.largeBody : null]}>{sceneText}</Text>
               <View style={styles.controls}>

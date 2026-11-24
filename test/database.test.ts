@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { deleteStory, initialize, loadAppSettings, loadLibrary, loadSettings, loadStory, saveAppSettings, saveProgress, saveSettings, saveStory, setFavorite } from '../src/database.ts';
+import { deleteStory, initialize, loadAppSettings, loadIllustrations, loadLibrary, loadSettings, loadStory, saveAppSettings, saveProgress, saveSettings, saveStory, setFavorite } from '../src/database.ts';
 import { getStoryTranslation } from '../src/story-translations.ts';
 import { stories } from '../src/stories.ts';
 
@@ -235,4 +235,28 @@ test('cada idioma contém o título e as 35 cenas do catálogo na ordem da vers�
   }
   assert.equal(stories.reduce((count, story) => count + story.scenes.length, 0), 35);
   assert.equal(getStoryTranslation('pt', 'dentista'), undefined);
+});
+
+test('preserva a referência à foto e deixa de listar fotos removidas', async () => {
+  const { db, close } = connect(':memory:');
+  try {
+    await initialize(db);
+    const photo = 'photo-local-1.jpg';
+    const draft = {
+      title: 'Visita',
+      category: 'Saúde',
+      scenes: [{ title: 'Recepção', text: 'Espero minha vez.', illustration: photo }],
+    };
+    await saveStory(db, draft);
+    const created = (await loadLibrary(db)).find((story) => story.custom);
+    assert.ok(created);
+    assert.equal((await loadStory(db, created.id)).scenes[0].illustration, photo);
+    assert.ok((await loadIllustrations(db)).includes(photo));
+
+    await saveStory(db, { ...draft, scenes: [{ ...draft.scenes[0], illustration: 'chair' }] }, created.id);
+    assert.ok(!(await loadIllustrations(db)).includes(photo));
+    assert.ok((await loadIllustrations(db)).includes('chair'));
+  } finally {
+    close();
+  }
 });
